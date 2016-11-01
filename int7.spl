@@ -1,0 +1,169 @@
+alias psp S0;
+alias syscall S1;
+alias i S2;
+alias readypid S3;
+alias currentpid S4;
+alias currentpcb S5;
+alias sysindex S6;
+alias block S7;
+alias j S8;
+alias newpcb S9;
+alias wpid S10;
+alias waitpcb S11;
+alias pid S12;
+alias count S13;
+
+psp=([PTBR+(SP/512)*2]*512)+(SP%512);
+syscall=[psp-1];
+
+							//find currentpcb with help of currentpid
+	currentpid=(PTBR-PAGE_TABLE)/8;
+	currentpcb=READY_LIST+(currentpid*32);
+
+if(syscall==10 || syscall==14) then
+								//find currentpcb with help of currentpid
+//	currentpid=(PTBR-PAGE_TABLE)/8;
+//	currentpcb=READY_LIST+(currentpid*32);
+								//if exiting process stops other which waits for this process should resume
+	i=0;
+	while(i<32) do
+		if([READY_LIST+(i*32)+1]==(100+currentpid)) then
+			[READY_LIST+(i*32)+1]=1;
+		endif;
+		i=i+1;
+	endwhile;
+	
+	if(syscall==14) then
+		ireturn;
+	endif;
+								//doing round robin scheduling
+	//readypid=0;
+	i=currentpid+1;
+	i=i%32;
+	while ([READY_LIST+(32*i)+1]!=1) do
+		i=(i+1)%32;
+		//i=i%32;
+		if(i==currentpid) then				//if only one process
+			halt;
+		endif;
+      	endwhile;	
+								//if only one process
+	//if(readypid==-1) then
+	//	halt;
+	//endif;
+	readypid=i;
+								//close all files opened by current process
+	i=15;
+	while(i<31) do
+		if([currentpcb+i]!=-1) then
+			sysindex=[currentpcb+i];
+			[currentpcb+i]=-1;
+			[currentpcb+i+1]=-1;
+			[FILE_TABLE+(2*sysindex)+1]=[FILE_TABLE+(2*sysindex)+1]-1;
+			if([FILE_TABLE+(2*sysindex)+1]==0) then
+				[FILE_TABLE+(2*sysindex)]=-1;
+			endif;
+		endif;
+		i=i+2;
+	endwhile;
+								//current process state is 0
+	[currentpcb+1]=0;
+								//reset mfl and dfl since current process is being replaced
+	count=0;
+	while(count<8) do
+		if([PTBR+count+1]=="01" || [PTBR+count+1]=="11") then
+			[1280+[PTBR+count]]=[1280+[PTBR+count]]-1;
+		else
+			if([PTBR+count]>447) then
+				[6*512 + [PTBR+count]]=[6*512 + [PTBR+count]]-1;
+				store(6,20);
+			endif;
+		endif;
+		[PTBR+count]=-1;
+		[PTBR+count+1]="00";
+		count=count+2;
+	endwhile;
+								//load requried field into registers for newprocess to execute
+	newpcb=READY_LIST+(32*readypid);
+	[newpcb]=readypid;
+	
+endif;
+
+if(syscall==13) then
+	wpid=[psp-3];
+//	currentpid=(PTBR-PAGE_TABLE)/8;
+	waitpcb=READY_LIST+(wpid*32);
+								//currentpid must be 1
+		if([waitpcb+1]==2 || [waitpcb+1]==0) then
+		//if([waitpcb+1]!=1) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+								//CHECK FOR DEADLOCK
+	
+								//deadlock
+	while(1) do
+		if([waitpcb+1]>99) then
+				if([waitpcb+1]==100+currentpid) then
+						[psp-2]=-1;
+						ireturn;
+				else
+					pid=[waitpcb+1]-100;
+					waitpcb=READY_LIST+(pid*32);
+				endif;
+		else
+				break;
+		endif;
+	endwhile;
+//	currentpcb=READY_LIST+(currentpid*32);
+								//setting state of current pid
+	[currentpcb + 1]=wpid+100;
+	[currentpcb + 2]=BP;
+	[currentpcb + 3]=SP;
+	[currentpcb + 4]=[psp];
+	[currentpcb + 5]=PTBR;
+	[currentpcb + 6]=PTLR;
+	[currentpcb + 7]=R0;
+	[currentpcb + 8]=R1;
+	[currentpcb + 9]=R2;
+	[currentpcb + 10]=R3;
+	[currentpcb + 11]=R4;
+	[currentpcb + 12]=R5;
+	[currentpcb + 13]=R6;
+	[currentpcb + 14]=R7;
+	
+								//doing round robin scheduling
+	i=currentpid+1;
+	i=i%32;
+	while ([READY_LIST+(32*i)+1]!=1) do
+		i=i+1;
+		i=i%32;
+      	endwhile;	
+	newpcb=READY_LIST + 32 * i;
+								//copying back register contents of newly arrived process
+	
+endif;
+
+
+
+[newpcb+1]=2;
+	BP=[newpcb+2];
+	SP=[newpcb+3];
+	SP=SP+1;
+	PTBR=[newpcb+5];
+	psp=([PTBR+(SP/512)*2]*512)+(SP%512);
+	[psp]=[newpcb+4];
+
+	PTLR=[newpcb+6];
+	R0=[newpcb+7];
+	R1=[newpcb+8];
+	R2=[newpcb+9];
+	R3=[newpcb+10];
+	R4=[newpcb+11];
+	R5=[newpcb+12];
+	R6=[newpcb+13];
+	R7=[newpcb+14];
+	[newpcb+1]=2;
+	ireturn;
+
+halt;

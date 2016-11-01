@@ -1,0 +1,201 @@
+alias psp S0;
+alias syscall S1;
+alias i S2;
+alias k S3;
+alias pid S4;
+alias pcb S5;
+alias var S6;
+alias childpsp S7;
+alias basicblock S8;
+alias currentpid S9;
+alias ptable S10;
+alias pcbindex S11;
+alias sysindex S12;
+alias currentpcb S13;
+alias flag S14;
+alias j S15;
+
+psp=([PTBR+2*(SP/512)]*512)+(SP%512);
+syscall=[psp-1];
+pid=(PTBR-PAGE_TABLE)/8;
+pcb=READY_LIST+(32*pid);
+if(syscall==8) then
+   i=1;
+   pcbindex=-5;
+   var=0;
+   while(var<32) do                             // checking for pcb state=0
+	if([READY_LIST+var*32+1]==0) then
+               pcbindex=var;
+               break;
+        endif;
+	var=var+1;
+   endwhile;
+   if(pcbindex==-5) then          //no pcb are free
+	[psp-2]=-1;
+	ireturn;
+   endif;
+   [READY_LIST+pcbindex*32]=pcbindex;   //setting pid of child process
+   
+   					//check a free page for stack for child process
+  
+  
+  
+   i=25;							//check for free page for stack
+	flag=0;
+	while(i<64) do
+		flag=0;
+		if([1280+i]==0) then
+			[1280+i]=1;
+			flag=i;
+			var=i;
+			break;
+		endif;
+		i=i+1;
+	endwhile;
+								//if no free page is found then use second chance algo to find one
+	if(flag==0) then
+								//second chance algorithm
+		currentpid=(PTBR-PAGE_TABLE)/8;
+		currentpid=currentpid-1;
+		ptable=PTBR-8;
+		k=0;//print"satheesh";
+		while(1) do
+			ptable=ptable+8;
+			ptable=(2*512)+(ptable%256);
+			
+			i=0;
+			while(i<6) do
+				if([ptable+i+1]=="01") then
+					
+											//page should be shared by exactly one process
+					if([1280+[ptable+i]]==1) then
+						
+						flag=[ptable+i];
+						var=[ptable+i];
+											//swapout
+						//dfl=6*512;
+						j=448;
+						syscall=0;
+											//checking for free swapblock
+						while(j<512) do
+							if([6*512+j]==0) then
+								syscall=j;
+								break;
+							endif;
+							j=j+1;
+						endwhile;
+						
+											//no free swapblock then exit
+						if(syscall==0) then
+							print"Swap block is full";
+													//transfer control to int7(Exit)
+							psp=([PTBR+(2*SP/512)]*512)+(SP%512);
+							[psp-1]=10;
+							inline "JMP 11776";
+						endif;
+											//store victim page in swapblock and change dfl
+						store(flag,syscall);
+						[6*512+syscall]=1;
+											//modify ptable of victimpage
+						[ptable+i]=syscall;
+						[ptable+i+1]="00";
+						break;
+					endif;
+				endif;
+				if([ptable+i+1]=="11") then
+					
+					[ptable+i+1]="01";
+				endif;
+				
+				i=i+2;
+			endwhile;
+			if(flag!=0) then
+				
+				break;
+			endif;
+										//cannot find victimpage (to prevent infinite loop)
+			if(k==32+32) then
+				print"stack not found";
+				[psp-2]=-1;
+			   	ireturn;
+			endif;
+			k=k+1;
+		endwhile;
+	endif;
+
+  
+  	
+   
+   
+   					//copy stack of parent to child's stack
+   i=[PTBR+6]*512;
+   k=var*512;
+   var=0;
+   while(var<512) do
+   	[k+var]=[i+var];
+   	var=var+1;
+   endwhile;
+   					//finding child ptbr
+   var=PAGE_TABLE+(8*pcbindex);
+   					//setting stack in PTBR of child process
+   [var+6]=k/512;
+   [var+7]="01";
+   					//setting pagetable of data pages
+   i=0;
+   while(i<6) do
+   	[var+i]=[PTBR+i];
+   	[var+i+1]=[PTBR+i+1];
+   	//print"ptbr";
+   	//print([PTBR+i]);
+   	//print([PTBR+i+1]);
+								//if data block is valid increment in mfl
+   	if([var+i+1]=="01" || [var+i+1]=="11") then
+   		[1280+[var+i]]=[1280+[var+i]]+1;
+   								//if data block is invalid and data block is in swap area increment in dfl
+   	else
+   		if([var+i]>447) then
+   			[6*512 + [var+i]]=[6*512 + [var+i]]+1;
+   			store(6,20);
+   		endif;
+   	endif;
+   	i=i+2;
+   endwhile;
+   					
+   //store(2,508);
+   //breakpoint;
+   
+   syscall=READY_LIST+32*pcbindex;
+  
+   [syscall+5]=PAGE_TABLE+8*pcbindex; //setting ptbr of child process in pcb
+   [syscall+4]=[psp];
+   [syscall+3]=SP-1;
+   [syscall+2]=BP;
+   [syscall+6]=PTLR;
+[syscall+7]=R0;
+[syscall+8]=R1;
+[syscall+9]=R2;
+[syscall+10]=R3;
+[syscall+11]=R4;
+[syscall+12]=R5;
+[syscall+13]=R6;
+[syscall+14]=R7;
+						//setting ppid
+[READY_LIST+32*pcbindex+31]=pid;
+var=0;
+  while(var<8) do                           //setting per procees tble fr child process
+	[READY_LIST+32*pcbindex+var*2+15]=[pcb+15+var*2];
+	[READY_LIST+32*pcbindex+var*2+16]=[pcb+var*2+16];
+	
+	if([pcb+15+var]!=-1) then
+		sysindex=[pcb+15+var*2];
+		[FILE_TABLE+(2*sysindex)+1]=[FILE_TABLE+(2*sysindex)+1]+1;
+	endif;
+	var=var+1;
+  endwhile;
+  [READY_LIST+32*pcbindex+1]=1;  //setting child process as ready
+  [psp-2]=pcbindex;
+childpsp=([[READY_LIST+32*pcbindex+5]+2*((SP-1)/512)]*512)+((SP-1)%512);
+  [childpsp-1]=-2;
+  ireturn;
+
+endif;

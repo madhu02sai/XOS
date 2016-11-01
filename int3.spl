@@ -1,0 +1,108 @@
+alias psp S0;
+alias syscall S1;
+alias fdor S2;
+alias newseek S3;
+alias pid S4;
+alias pcb S5;
+alias sysindex S6;
+alias fatindex S7;
+alias fsize S8;
+alias lseek S9;
+alias basicblock S10;
+alias datablock S11;
+alias offset S12;
+alias var S13;
+
+psp=([PTBR+2*(SP/512)]*512)+(SP%512);
+syscall=[psp-1];
+
+if(syscall==6) then
+	fdor=[psp-4];
+	newseek=[psp-3];
+	//check for valid file size
+	if(newseek<0) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+								//check if fdor is valid
+	if(fdor<0) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+	if(fdor>7) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+								//fetck file size
+	//obtain pcb from pid
+	pid=(PTBR-PAGE_TABLE)/8;
+	pcb=READY_LIST+(32*pid);
+								//if fdor is ivalid in per process oft error
+	if([pcb+15+(2*fdor)]==-1) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+								//obtain sysindex from per process oft
+	sysindex=[pcb+15+(2*fdor)];
+								//go to FAT index with help os sysindex
+	fatindex=[FILE_TABLE+(2*sysindex)];
+	
+	fsize=[FAT+(8*fatindex)+1];
+								//obtainded file size
+	//check again for valid file size
+	if(newseek>=fsize) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+								//replace new seek value
+	[pcb+15+(2*fdor)+1]=newseek;
+	[psp-2]=0;
+	ireturn;
+endif;
+
+if(syscall==7) then
+	fdor=[psp-4];
+								//check if fdor is valid
+	if(fdor<0) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+	if(fdor>7) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+								//obtain pcb from pid
+	pid=(PTBR-PAGE_TABLE)/8;
+	pcb=(READY_LIST+(32*pid));
+								//if fdor is invalid
+	if([pcb+15+(2*fdor)]==-1) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+								//obtain sysindex and lseek from per process oft
+	var=pcb+15+(2*fdor);
+	sysindex=[var];
+	lseek=[var+1];
+	//[var+1]=[var+1]+1;   		//obtain basicblock & filesize from FAT
+	fatindex=[FILE_TABLE+(2*sysindex)];
+	basicblock=[FAT+(8*fatindex)+2];
+	fsize=[FAT+(8*fatindex)+1];
+								//checking if lseek is valid or not
+								//becomes invalid if lseek=511 and we call write
+	if(lseek>=fsize) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+								//finding datablock and offset
+	load(1,basicblock);
+	datablock=lseek/512;
+	offset=lseek%512;
+								//increase lseek
+	[var+1]=[var+1]+1;
+								//reading and returning
+	load(1,[512+datablock]);
+	
+	[psp-3]=[512+offset];
+	[psp-2]=0;
+	ireturn;
+endif;

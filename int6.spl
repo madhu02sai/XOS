@@ -1,0 +1,109 @@
+alias psp S0;
+alias syscall S1;
+alias fname S2;
+alias i S3;
+alias basicblock S4;
+alias newsize S5;
+alias currentsize S6;
+alias diff S7;
+alias page S8;
+alias count S9;
+alias j S10;
+alias currentpid S11;
+alias currentpcb S12;
+alias sysindex S13;
+alias ppid S14;
+alias parentpcb S15;
+
+psp=([PTBR+(SP/512)*2]*512)+(SP%512);
+syscall=[psp-1];
+if(syscall==9) then
+	fname=[psp-3];
+	i=0;
+	basicblock=-1;
+								//chech if fname is in FAT
+	while(i<64) do
+		if([FAT+(8*i)]==fname) then
+			basicblock=[FAT+(8*i)+2];
+			newsize=[FAT+(8*i)+1]/512;		//storing new size and basic block
+			break;
+		endif;
+		i=i+1;
+	endwhile;
+								//not there in FAT
+	if(basicblock==-1) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+								//newsize should not be more than 3
+	if(newsize>3) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+								//reset mfl and dfl since current process is being replaced
+	count=0;
+	while(count<6) do
+		if([PTBR+count+1]=="01" || [PTBR+count+1]=="11") then
+			[1280+[PTBR+count]]=[1280+[PTBR+count]]-1;
+		else
+			if([PTBR+count]>447) then
+				[6*512 + [PTBR+count]]=[6*512 + [PTBR+count]]-1;
+				store(6,20);
+			endif;
+		endif;
+		count=count+2;
+	endwhile;
+	[PTBR+7]="01";
+	
+	//store(2,509);
+	
+								//load memory of disk blocks of new process into pagetable
+	load(1,basicblock);
+	i=0;
+	while(i<3) do
+		[PTBR+(2*i)]=[512+i];
+		[PTBR+(2*i)+1]="00";
+		i=i+1;
+	endwhile;
+								//closing all files opened by the current process
+	currentpid=(PTBR-PAGE_TABLE)/8;
+	currentpcb=READY_LIST+(currentpid*32);
+	i=15;
+	while(i<31) do
+		if([currentpcb+i]!=-1) then
+			sysindex=[currentpcb+i];
+			[currentpcb+i]=-1;
+			[currentpcb+i+1]=-1;
+			[FILE_TABLE+(2*sysindex)+1]=[FILE_TABLE+(2*sysindex)+1]-1;
+			if([FILE_TABLE+(2*sysindex)+1]==0) then
+				[FILE_TABLE+(2*sysindex)]=-1;
+			endif;
+		endif;
+		i=i+2;
+	endwhile;
+	
+	SP=3*512;
+	psp=([PTBR+(SP/512)*2]*512)+(SP%512);
+	[psp]=0;
+	//[psp-2]=0;
+	ireturn;
+endif;
+if(syscall==11) then
+								//getpid syscall
+	currentpid=(PTBR-PAGE_TABLE)/8;
+	[psp-2]=currentpid;
+	ireturn;
+endif;
+if(syscall==12) then
+								//getppid syscall
+	currentpid=(PTBR-PAGE_TABLE)/8;
+	currentpcb=READY_LIST+(currentpid*32);
+	ppid=[currentpcb+31];
+	parentpcb=READY_LIST+(ppid*32);
+	if([parentpcb+1]==0) then				//checking if parent is killed
+		[psp-2]=0;
+		ireturn;
+	endif;
+	[psp-2]=ppid;
+	ireturn;
+endif;

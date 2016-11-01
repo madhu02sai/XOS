@@ -1,0 +1,152 @@
+alias Cause S0;
+alias VPagenum S1;
+alias Ip_addr S2;
+alias psp S3;
+alias currentpid S4;
+alias currentpcb S5;
+alias ptable S6;
+alias flag S7;
+alias i S8;
+alias dfl S9;
+alias k S10;
+alias j S11;
+alias swapblock S12;
+alias diskblock S13;
+alias flag2 S14;
+
+Cause = EFR % 10;		// Gets value of cause field (size 1 char)
+VPagenum = (EFR / 10) % 100;    // Gets value of BadVAddr 
+Ip_addr = (EFR/1000);		//Gets value of IP at the point of exception
+
+if(Cause!=0) then						//not page fault
+								//print corresponding exception
+	if(Cause==1) then
+		print"Illegal Instruction";
+	endif;
+	if(Cause==2) then
+		print"Illegal Memory Access";
+	endif;
+	if(Cause==3) then
+		print"Arthimetic Exception";
+	endif;
+	if(Cause==4) then
+		print"Illegal Operands";
+	endif;
+								//transfer control to int7(Exit)
+	psp=([PTBR+(2*SP/512)]*512)+(SP%512);
+	[psp-1]=10;
+	inline "JMP 11776";
+else
+								//page fault
+								//if page is invalid exit
+	if([PTBR+(2*VPagenum)]==-1) then
+		print"Illegal Memory Access 2";
+								//transfer control to int7(Exit)
+		psp=([PTBR+(2*SP/512)]*512)+(SP%512);
+		[psp-1]=10;
+		inline "JMP 11776";
+	endif;
+	i=25;							//check for free page for stack
+	flag=0;
+	while(i<64) do
+		flag=0;
+		if([1280+i]==0) then
+			[1280+i]=1;
+			flag=i;
+			break;
+		endif;
+		i=i+1;
+	endwhile;
+								//if no free page is found then use second chance algo to find one
+	if(flag==0) then
+								//second chance algorithm
+		currentpid=(PTBR-PAGE_TABLE)/8;
+		currentpid=currentpid-1;
+		ptable=PTBR-8;
+		k=0;//print"satheesh";
+		flag2=0;
+		while(1) do
+			ptable=ptable+8;
+			ptable=(2*512)+(ptable%256);
+			
+			i=0;
+			if(flag2==0) then
+				i=2*VPagenum;
+				flag2=1;
+			endif;
+			while(i<6) do
+				if([ptable+i+1]=="01") then
+					
+											//page should be shared by exactly one process
+					if([1280+[ptable+i]]==1) then
+						
+						flag=[ptable+i];
+											//swapout
+						dfl=6*512;
+						j=448;
+						swapblock=0;
+											//checking for free swapblock
+						while(j<512) do
+							if([dfl+j]==0) then
+								swapblock=j;
+								break;
+							endif;
+							j=j+1;
+						endwhile;
+						
+											//no free swapblock then exit
+						if(swapblock==0) then
+							print"Swap block is full";
+													//transfer control to int7(Exit)
+							psp=([PTBR+(2*SP/512)]*512)+(SP%512);
+							[psp-1]=10;
+							inline "JMP 11776";
+						endif;
+											//store victim page in swapblock and change dfl
+						store(flag,swapblock);
+						[dfl+swapblock]=1;
+											//modify ptable of victimpage
+						[ptable+i]=swapblock;
+						[ptable+i+1]="00";
+						break;
+					endif;
+				endif;
+				if([ptable+i+1]=="11") then
+					
+					[ptable+i+1]="01";
+				endif;
+				
+				i=i+2;
+			endwhile;
+			if(flag!=0) then
+				
+				break;
+			endif;
+										//cannot find victimpage (to prevent infinite loop)
+			if(k==32+32) then
+				print"cannot find victimpage";
+										//transfer control to int7(Exit)
+				psp=([PTBR+(2*SP/512)]*512)+(SP%512);
+				[psp-1]=10;
+				inline "JMP 11776";
+			endif;
+			k=k+1;
+		endwhile;
+	endif;
+	
+										//get disk block(physical pagenum) of VPagenum
+	dfl=6*512;
+	diskblock=[PTBR+(2*VPagenum)];
+	if(diskblock>447) then
+		[dfl+diskblock]=[dfl+diskblock]-1;
+	endif;
+	load(flag,diskblock);
+	[PTBR+(2*VPagenum)]=flag;
+	[PTBR+(2*VPagenum)+1]="11";
+	//IP is not stored on stack
+	SP=SP+1;
+	psp=([PTBR+(2*SP/512)]*512)+(SP%512);
+	[psp]=Ip_addr;
+	ireturn;
+	
+endif;

@@ -1,0 +1,91 @@
+load(7,1);	//loading exhandler
+load(8,2);
+load(23,17);	//loading int7
+load(24,18);
+load(9,3);	//loading timer
+load(10,4);
+load(5,19);	//loading FAT
+load(6,20);	//loading DFL
+[READY_LIST + 0]=0;
+//load(25,21);	//loading init
+//load(26,22);
+//load(27,23);
+PTBR=PAGE_TABLE;
+PTLR=4;
+[PTBR + 0]=21;		//setting pagetable
+[PTBR + 1]="00";
+[PTBR + 2]=22;
+[PTBR + 3]="00";
+[PTBR + 4]=23;
+[PTBR + 5]="00";
+[PTBR + 6]=25;
+[PTBR + 7]="01";
+[READY_LIST + 1]=2;
+SP=3*512;
+[25 * 512]=0;
+			//setting ppid
+[READY_LIST + 31]=0;
+			//setting sys wide open file table
+alias var S0;
+var=0;
+while(var<64*2) do
+	[FILE_TABLE+var+0]=-1;
+	[FILE_TABLE+var+1]=0;
+	var=var+2;
+endwhile;
+			//setting per process open file table
+var=15;
+while(var<31) do
+	[READY_LIST+var]=-1;
+	[READY_LIST+var+1]=-1;
+	var=var+2;
+endwhile;
+			//loading int1
+load(11,5);
+load(12,6);
+			//loading int2
+load(13,7);
+load(14,8);
+			//loading int4
+load(17,11);
+load(18,12);
+			//loading int3
+load(15,9);
+load(16,10);
+			//loading int5
+load(19,13);
+load(20,14);
+			//loading int6
+load(21,15);
+load(22,16);
+			//loading int7
+//load(23,17);
+//load(24,18);
+			//initialising PCB's
+var=1;
+while(var<32) do
+	[READY_LIST+(var*32)+1]=0;
+	var=var+1;
+endwhile;
+			//initialising mem free list
+var=0;
+while(var<64) do
+	if(var<26) then
+		[1280+var]=1;
+	else
+		[1280+var]=0;
+	endif;
+	var=var+1;
+endwhile;
+store(2,510);
+alias dfl S1;
+			//reset the swap area in dfl
+dfl=6*512;
+var=448;
+while(var<512) do
+	[dfl+var]=0;
+	var=var+1;
+endwhile;
+			//commit dfl back to disk
+store(6,20);
+ireturn;

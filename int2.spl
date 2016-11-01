@@ -1,0 +1,129 @@
+alias syscall S0;
+alias psp S1;
+alias fname S2;
+alias fatindex S3;
+alias var S4;
+alias sysindex S5;
+alias pid S6;
+alias pcb S7;
+alias perindex S8;
+alias flag S9;
+alias ind S10;
+psp=([PTBR+(2*(SP/512))]*512)+(SP%512);
+syscall=[psp-1];
+			//[psp-2] is return val\
+if(syscall==2) then
+	fname=[psp-3];
+	flag=0;
+	var=5*512;					// checking FAT
+	while(var<6*512) do
+		if([var]==fname) then
+			fatindex=(var-5*512)/8;
+			flag=1;
+			break;
+		endif;
+		var=var+8;
+	endwhile;
+	if(flag==0) then				//if fname is not in FAT error
+		[psp-2]=-1;
+		ireturn;
+	endif;
+							//check in sys wide oft
+	var=0;
+	sysindex=-1;
+	while(var<64*2) do
+		if([FILE_TABLE+var]==-1) then		//checking if space is there in sys wide oft to open fname
+			sysindex=var/2;
+			break;
+		endif;
+		var=var+2;
+	endwhile;
+							//no space for fname in sys wide oft
+	if(sysindex==-1) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+							//check if fname is already opened
+	var=0;
+	sysindex=-1;
+	while(var<64*2) do
+		if([FILE_TABLE+var]==fatindex) then
+			sysindex=var/2;
+			break;
+		endif;
+		var=var+2;
+	endwhile;
+							//if not opened check a space in sys wide oft to open fname
+	if(sysindex==-1) then
+	var=0;
+	while(var<64*2) do
+		if([FILE_TABLE+var]==-1) then		
+			sysindex=var/2;
+			break;
+		endif;
+		var=var+2;
+	endwhile;
+	endif;
+							//obtaining pcb from pid
+	pid=(PTBR-PAGE_TABLE)/8;
+	pcb=READY_LIST+pid*32;
+	perindex=-1;
+	var=15;
+							//checking for free space in per process oft
+	while(var<31) do
+		if([pcb+var]==-1) then
+			perindex=(var-15)/2;
+			break;
+		endif;
+		var=var+2;
+	endwhile;
+							//no space to open fname in per process oft
+	if(perindex==-1) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+							//setting return value
+	[psp-2]=perindex;
+	`						//setting per process oft
+	[pcb+15+(perindex*2)]=sysindex;
+	[pcb+16+(perindex*2)]=0;
+							//setting sys wide oft
+	[FILE_TABLE+(sysindex*2)]=fatindex;
+	[FILE_TABLE+(sysindex*2)+1]=[FILE_TABLE+(sysindex*2)+1]+1;
+	
+	ireturn;
+	
+else
+	ind=[psp-3];
+								//obtaining pcb from pid
+	pid=(PTBR-PAGE_TABLE)/8;
+	pcb=READY_LIST+pid*32;
+								//checking valid ind
+	if(ind<0) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+	if(ind>7) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+								//if not present in per process oft
+	if([pcb+15+(2*ind)]==-1) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+								//setting sys wide oft	
+	sysindex=[pcb+15+(2*ind)];
+	[FILE_TABLE+(sysindex*2)+1]=[FILE_TABLE+(sysindex*2)+1]-1;
+								//no file in sys wide oft(after closing) then set invalid
+	if([FILE_TABLE+(sysindex*2)+1]==0) then
+		[FILE_TABLE+(sysindex*2)]=-1;
+	endif;
+								//setting per process oft
+	[pcb+15+(2*ind)]=-1;
+	[pcb+15+(2*ind)+1]=-1;
+								//returning
+	[psp-2]=0;
+	ireturn;
+	
+endif;

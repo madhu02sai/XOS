@@ -1,0 +1,160 @@
+alias syscallno S0;
+alias return S1;
+alias fname S2;
+alias i S3;
+alias j S4;
+alias dfl S5;
+alias fblock S6;
+alias psp S7;
+alias fatindex S8;
+alias fileindex S9;
+alias basicblock S10;
+alias datablock S11;
+alias k S12;
+
+psp=([PTBR + 2 * (SP / 512)] * 512) + (SP % 512);
+syscallno=[psp-1]; //system call no
+
+return=[psp-2]; //return value
+
+fname=[psp-3]; //filename
+
+if(syscallno==1) then
+	//check if same fname exists in fat
+	i=0;
+	j=1;
+	while (j!=64) do
+		if([FAT+i]==fname)
+		then
+		[psp-2]=0;
+		ireturn;
+		endif;
+	i=i+8;
+	j=j+1;
+	endwhile;
+
+	//yes: return =0
+	//no:
+	//check for free block in dfl
+	dfl=6*512;
+	i=24;
+	fblock=0;
+	while (i<448) do
+		if([dfl+i]==0)
+		then
+		fblock=i;
+		break;
+		endif;
+	i=i+1;
+	endwhile;
+	//if not present return=-1 
+	if(fblock==0)
+	then
+	[psp-2]=-1;
+	ireturn;
+	endif;
+
+	//else update new fat with fname,bno,size=0
+	k=-1;
+	i=0;
+	j=1;
+	while(j<=64) do
+		if([FAT+i+2]==-1)
+		then
+		k=i;
+		break;
+		endif;
+	i=i+8;
+	j=j+1;
+	endwhile;
+	//if there is no space in FAT
+	if(k==-1) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+	[FAT+i+0]=fname;
+	[FAT+i+1]=0;
+	[FAT+i+2]=fblock;
+	//load basicblock into scratchpad
+	load(1,fblock);
+	//update basicblock
+	i=512;
+	while(i<1024-256) do
+	[i]=-1;
+	i=i+1;
+	endwhile;
+	//store it back in disk
+	store(1,fblock);
+	//entry for basicblock in dfl is set to 1
+	[dfl+fblock]=1;
+	//restore fat,dfl in disk
+	store(5,19);
+	store(6,20);
+	[psp-2]=0;
+else
+	//check if same fname exists in fat
+	i=0;
+	fatindex=-1;
+	while (i<64*8) do
+		if([FAT+i]==fname)
+		then
+			fatindex=i/8;
+			break;
+		endif;
+	i=i+8;
+	endwhile;
+	//if fname in not in FAT
+	if(fatindex==-1) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+	//check if fname is opened if it is open it is bad to delete
+	i=0;
+	fileindex=-1;
+	while(i<64*2) do
+		if([FILE_TABLE+i]==fatindex) then
+			fileindex=i/2;
+			break;
+		endif;
+		i=i+2;
+	endwhile;
+	//if fname is opened then error
+	if(fileindex!=-1) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+	//setting FAT
+	[FAT+(8*fatindex)]=-1;
+	[FAT+(8*fatindex)+1]=0;
+	basicblock=[FAT+(8*fatindex)+2];
+	[FAT+(8*fatindex)+2]=-1;
+	//cleaning basicblock and datablocks and setting dfl
+	load(1,basicblock);
+	dfl=6*512;
+	i=512;
+	while(i<512+256) do					//going through basicblock
+		if([i]!=-1) then
+			datablock=[i];
+			load(1,[i]);
+			j=512;
+			while(j<1024) do			//setting datablock
+				[j]="";
+				j=j+1;
+			endwhile;
+			[dfl+[i]]=0;
+			store(1,datablock);				//restoring data blocks in disk
+			load(1,basicblock);
+		else break;
+		endif;
+		[i]="";
+		i=i+1;
+	endwhile;
+	[dfl+basicblock]=0;
+	store(1,basicblock);
+	//restore fat and dfl
+	store(5,19);
+	store(6,20);
+	//return 0
+	[psp-2]=0;
+endif;
+ireturn;

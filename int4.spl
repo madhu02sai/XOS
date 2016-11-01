@@ -1,0 +1,94 @@
+alias  psp S0;
+alias syscall S1;
+alias filedor S2;
+alias word S3;
+alias pid S4;
+alias pcb S5;
+alias lseek S6;
+alias fatindex S7;
+alias basicblock S8;
+alias offset S9;
+alias i S10;
+alias datablock2 S11;
+alias sysindex S12;
+alias datablock S13;
+alias fdor S14;
+alias fsize S15;
+
+psp=([PTBR+2*(SP/512)]*512)+(SP%512);
+syscall=[psp-1];
+
+if(syscall==5) then
+	filedor=[psp-4];
+	word=[psp-3];
+								//checking valid filedor
+	if(filedor<0) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+	if(filedor>7) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+								//check if filedor value is valid
+	pid=(PTBR-PAGE_TABLE)/8;
+	pcb=READY_LIST+(32*pid);
+	if([pcb+15+(2*filedor)]==-1) then
+		[psp-2]=-1;
+		ireturn;
+	endif;
+								//store lseek and sysindex
+	sysindex=[pcb+15+(2*filedor)];
+	lseek=[pcb+15+(2*filedor)+1];
+	
+	[pcb+15+(2*filedor)+1]=[pcb+15+(2*filedor)+1]+1;
+								//finding basicblock & datablock
+	fatindex=[FILE_TABLE+(2*sysindex)];
+	basicblock=[FAT+(8*fatindex)+2];
+	load(1,basicblock);
+	datablock=[512 +lseek/512];
+	offset=lseek%512;
+	
+	
+								//if there is no place to write i.e, no datablock
+	if(datablock==-1) then
+		i=(6*512)+23;
+		datablock2=-1;
+		while(i<(6*512)+448) do				//checking in dfl
+			if([i]==0) then
+				datablock2=i-(6*512);
+				[i]=1;
+				break;
+			endif;
+			i=i+1;
+		endwhile;
+								//cannot create new datablock
+		if(datablock2==-1) then
+			[psp-2]=-1;
+			ireturn;
+		endif;
+		[512+lseek/512]=datablock2;
+		//print(basicblock);
+		store(1,basicblock);
+								//update size in FAT since you added a new datablock
+		[FAT+(8*fatindex)+1]=[FAT+(8*fatindex)+1]+512;
+		datablock=datablock2;
+		//print(datablock2);
+		i=datablock2;
+		load(1,datablock2);
+	else
+		i=datablock;
+		load(1,datablock);
+	endif;
+								//finally we load datablock to be written into scratchpad
+	[512+offset]=word;
+	
+							//restore datablock FAT dfl
+	store(1,i);
+	store(5,19);
+	store(6,20);
+	[psp-2]=0;
+	ireturn;
+endif;
+
+
